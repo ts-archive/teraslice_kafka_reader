@@ -1,3 +1,11 @@
+# Reader - teraslice_kafka_reader
+
+To install from the root of your teraslice instance.
+
+```
+npm install terascope/teraslice_kafka_reader
+```
+
 # Description
 
 Teraslice reader for processing data from kafka topics.
