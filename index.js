@@ -1,29 +1,18 @@
 'use strict';
 
 var Promise = require("bluebird");
-var op = 'kafka_simple_reader';
 
 function newReader(context, opConfig, jobConfig) {
-    // TODO: this will move out into a connector
-    var Kafka = require("node-rdkafka");
     var consumer_ready = false;
     var subscribed = false;
     var consumer;
 
     return function(partition, logger) {
-console.log("Parition: " + partition);
         if (! consumer_ready) {
-            consumer = new Kafka.KafkaConsumer({
-                'group.id': opConfig.group,
-                'metadata.broker.list': 'localhost:9092'
-            }, {
-                // TODO: we'll want to expose some of these settings
-                "auto.offset.reset": "smallest"
-            });
-
-            // TODO: errors and diconnects should set consumer_ready false
-
-            consumer.connect();
+            consumer = context.foundation.getConnection({
+                type: "kafka",
+                endpoint: opConfig.connection
+            }).client;
 
             consumer.on('ready', function() {
                 consumer_ready = true;
@@ -34,7 +23,6 @@ console.log("Parition: " + partition);
 
         // We have to wait for the consumer to be ready. After the
         // first slice this usually isn't an issue.
-
         var subscriber = setInterval(function() {
             if (consumer_ready && ! subscribed) {
                 logger.info("Subscribing to topic " + opConfig.topic);
@@ -131,6 +119,11 @@ function schema(){
             doc: 'How long to wait for a full chunk of data to be available. Specified in milliseconds.',
             default: 1000,
             format: Number
+        },
+        connection: {
+            doc: 'The Kafka consumer connection to use.',
+            default: '',
+            format: 'required_String'
         }
     };
 }

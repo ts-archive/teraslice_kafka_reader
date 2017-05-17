@@ -14,7 +14,5 @@
   },
   "homepage": "https://github.com/terascope/teraslice_kafka_reader#readme",
   "dependencies": {
-    "bluebird": "^3.5.0",
-    "node-rdkafka": "^0.10.2"
   }
 }
