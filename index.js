@@ -11,7 +11,11 @@ function newReader(context, opConfig, jobConfig) {
         if (! consumer_ready) {
             consumer = context.foundation.getConnection({
                 type: "kafka",
-                endpoint: opConfig.connection
+                endpoint: opConfig.connection,
+                options: {
+                    type: "consumer",
+                    group: opConfig.group
+                }
             }).client;
 
             consumer.on('ready', function() {
