@@ -68,7 +68,7 @@ function newReader(context, opConfig, jobConfig) {
                 reject(err);
             }
 
-            var consuming = setInterval(function() {
+            function consume() {
                 if (subscribed) {
                     if (((Date.now() - iteration_start) > opConfig.wait) || (slice.length >= opConfig.size)) {
                         completeSlice();
@@ -77,13 +77,18 @@ function newReader(context, opConfig, jobConfig) {
                         consumer.consume(opConfig.size - slice.length);
                     }
                 }
-            }, 1000)
+            }
+
+            var consuming = setInterval(consume, opConfig.interval)
 
             // This is going to have an issue that data will still be coming in
             // while the chunk is being processed.
             consumer.on('data', receiveData);
 
             consumer.on('error', error);
+
+            // Kick of initial processing.
+            consume();
         });
     }
 }
@@ -121,6 +126,11 @@ function schema(){
         },
         wait: {
             doc: 'How long to wait for a full chunk of data to be available. Specified in milliseconds.',
+            default: 30000,
+            format: Number
+        },
+        interval: {
+            doc: 'How often to attempt to consume `size` number of records. This only comes into play if the initial consume could not get a full slice.',
             default: 1000,
             format: Number
         },
