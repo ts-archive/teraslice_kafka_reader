@@ -22,8 +22,8 @@ An array of records from Kafka. Array may be up to `size` in length. No addition
 | group | Name of the Kafka consumer group | | Y |
 | connection | The Kafka consumer connection to use | | Y |
 | size | How many records to read before a slice is considered complete | 10000 | N |
-| wait | How long to wait for a full chunk of data to be available. Specified in milliseconds. | 10000 | N |
-
+| wait | How long to wait for a full chunk of data to be available. Specified in milliseconds. | 30000 | N |
+| interval | How often to attempt to consume `size` number of records. This only comes into play if the initial consume could not get a full slice. | 1000 | N |
 
 # Job configuration example
 

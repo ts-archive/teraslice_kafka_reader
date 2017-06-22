@@ -44,7 +44,6 @@ function newReader(context, opConfig, jobConfig) {
 
                 clearInterval(consuming);
 
-                //consumer.unsubscribe([opConfig.topic]);
                 consumer.removeListener('data', receiveData);
                 consumer.removeListener('error', error);
 
@@ -55,8 +54,6 @@ function newReader(context, opConfig, jobConfig) {
 
             function receiveData(data) {
                 slice.push(data.value);
-
-                //console.log(data.value.toString());
 
                 if (slice.length >= opConfig.size) {
                     completeSlice();
