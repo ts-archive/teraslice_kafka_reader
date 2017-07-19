@@ -118,7 +118,7 @@ function schema(){
         },
         size: {
             doc: 'How many records to read before a slice is considered complete.',
-            default: 10,
+            default: 10000,
             format: Number
         },
         wait: {
