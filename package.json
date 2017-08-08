@@ -1,6 +1,6 @@
 {
   "name": "teraslice_kafka_reader",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Teraslice reader to process data stored in kafka topics",
   "main": "index.js",
   "repository": {
@@ -14,5 +14,6 @@
   },
   "homepage": "https://github.com/terascope/teraslice_kafka_reader#readme",
   "dependencies": {
+    "bluebird": "^3.5.0"
   }
 }
