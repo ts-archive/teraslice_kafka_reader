@@ -6,6 +6,7 @@ function newReader(context, opConfig, jobConfig) {
     var consumer_ready = false;
     var subscribed = false;
     var consumer;
+    var events = context.foundation.getEventEmitter();
 
     return function(partition, logger) {
         if (! consumer_ready) {
@@ -39,6 +40,11 @@ function newReader(context, opConfig, jobConfig) {
         return new Promise(function(resolve, reject) {
             var slice = [];
             var iteration_start = Date.now();
+
+            events.on('worker:shutdown', function() {
+                consumer.disconnect();
+                resolve(slice)
+            });
 
             function completeSlice() {
 
