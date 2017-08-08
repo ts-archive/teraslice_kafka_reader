@@ -43,7 +43,7 @@ function newReader(context, opConfig, jobConfig) {
 
             events.on('worker:shutdown', function() {
                 consumer.disconnect();
-                resolve(slice)
+                resolve(slice);
             });
 
             function completeSlice() {
