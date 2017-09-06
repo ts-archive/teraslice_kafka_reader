@@ -15,75 +15,92 @@ function newReader(context, opConfig, jobConfig) {
     }).client;
 
     return new Promise(function(resolve, reject) {
+        var shuttingdown = false;
+
         consumer.on('ready', function() {
             jobLogger.info("Consumer ready");
             consumer.subscribe([opConfig.topic]);
+
             resolve(processSlice)
         });
+
+        function processSlice(partition, logger) {
+            return new Promise(function(resolve, reject) {
+                var slice = [];
+                var iteration_start = Date.now();
+                var consuming = setInterval(consume, opConfig.interval);
+
+                // Listeners are registered on each slice and cleared at the end.
+                function clearListeners() {
+                    clearInterval(consuming);
+                    consumer.removeListener('data', receiveData);
+                    consumer.removeListener('error', error);
+                    events.removeListener('worker:shutdown', shutdown);
+                }
+
+                // Called when the job is shutting down but this occurs before
+                // slice:success is called so we need to tell the handler we're
+                // shuttingdown.
+                function shutdown() {
+                    completeSlice();
+                    shuttingdown = true;
+                }
+
+                // Called when slice processing is completed.
+                function completeSlice() {
+                    clearListeners();
+                    jobLogger.warn(`Resolving with ${slice.length} results`);
+                    resolve(slice);
+                }
+
+                function error(err) {
+                    jobLogger.error(err);
+                    clearListeners();
+                    reject(err);
+                }
+
+                // Process a chunk of data received from Kafka
+                function receiveData(data) {
+                    slice.push(data.value);
+
+                    if (slice.length >= opConfig.size) {
+                        completeSlice();
+                    }
+                }
+
+                function consume() {
+                    if (((Date.now() - iteration_start) > opConfig.wait) || (slice.length >= opConfig.size)) {
+                        completeSlice();
+                    }
+                    else {
+                        consumer.consume(opConfig.size - slice.length);
+                    }
+                }
+
+                // We only want to move offsets if the slice is successful.
+                function commit() {
+                    consumer.commit();
+
+                    if (shuttingdown) {
+                        consumer.disconnect();
+                    }
+
+                    // This can't be called in clearListners as it must exist
+                    // after processing of the slice is complete.
+                    events.removeListener('slice:success', commit);
+                }
+
+                consumer.on('data', receiveData);
+                consumer.on('error', error);
+
+                events.on('worker:shutdown', shutdown);
+                events.on('slice:success', commit);
+
+                // Kick off initial processing.
+                consume();
+            });
+        }
     });
-
-    function processSlice(partition, logger) {
-        return new Promise(function(resolve, reject) {
-            var consuming = setInterval(consume, opConfig.interval);
-            var slice = [];
-            var iteration_start = Date.now();
-
-            consumer.on('data', receiveData);
-            consumer.on('error', error);
-
-            events.on('worker:shutdown', finishSlice);
-
-            // This is going to have an issue that data will still be coming in
-            // while the chunk is being processed.
-
-            // Kick of initial processing.
-            consume();
-
-
-            function clearListeners() {
-                clearInterval(consuming);
-                consumer.removeListener('data', receiveData);
-                consumer.removeListener('error', error);
-                events.removeListener('worker:shutdown', finishSlice);
-            }
-
-            function finishSlice() {
-                clearListeners();
-                consumer.disconnect();
-                resolve(slice);
-            }
-
-            function completeSlice() {
-                clearListeners();
-                logger.warn(`Resolving with ${slice.length} results`);
-                resolve(slice);
-            }
-
-            function receiveData(data) {
-                slice.push(data.value);
-
-                if (slice.length >= opConfig.size) {
-                    completeSlice();
-                }
-            }
-
-            function error(err) {
-                logger.error(err);
-                clearListeners();
-                reject(err);
-            }
-
-            function consume() {
-                if (((Date.now() - iteration_start) > opConfig.wait) || (slice.length >= opConfig.size)) {
-                    completeSlice();
-                }
-                else {
-                    consumer.consume(opConfig.size - slice.length);
-                }
-            }
-
-        });
-    }
 }
 
 function newSlicer(context, job, retryData, slicerAnalytics, logger) {
