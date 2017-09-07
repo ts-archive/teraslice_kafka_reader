@@ -103,6 +103,11 @@ function newReader(context, opConfig, jobConfig) {
     });
 }
 
+function slicerQueueLength() {
+    // Queue is not really needed so we just want the smallest queue size available.
+    return 'QUEUE_MINIMUM_SIZE';
+}
+
 function newSlicer(context, job, retryData, slicerAnalytics, logger) {
     // The slicer actually has no work to do here.
     return Promise.resolve([function() {
@@ -156,5 +161,5 @@ module.exports = {
     newReader: newReader,
     newSlicer: newSlicer,
     schema: schema,
-    parallelSlicers: false
+    slicerQueueLength: slicerQueueLength
 };
