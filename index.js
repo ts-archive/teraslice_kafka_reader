@@ -1,15 +1,15 @@
 'use strict';
 
-var Promise = require("bluebird");
+const Promise = require('bluebird');
 
-function newReader(context, opConfig, jobConfig) {
-    var events = context.foundation.getEventEmitter();
-    var jobLogger = context.logger;
-    var consumer = context.foundation.getConnection({
-        type: "kafka",
+function newReader(context, opConfig) {
+    const events = context.foundation.getEventEmitter();
+    const jobLogger = context.logger;
+    const consumer = context.foundation.getConnection({
+        type: 'kafka',
         endpoint: opConfig.connection,
         options: {
-            type: "consumer",
+            type: 'consumer',
             group: opConfig.group
         },
         topic_options: {
@@ -17,21 +17,21 @@ function newReader(context, opConfig, jobConfig) {
         }
     }).client;
 
-    return new Promise(function(resolve, reject) {
-        var shuttingdown = false;
+    return new Promise(((resolve) => {
+        let shuttingdown = false;
 
-        consumer.on('ready', function() {
-            jobLogger.info("Consumer ready");
+        consumer.on('ready', () => {
+            jobLogger.info('Consumer ready');
             consumer.subscribe([opConfig.topic]);
 
-            resolve(processSlice)
+            resolve(processSlice);
         });
 
-        function processSlice(partition, logger) {
-            return new Promise(function(resolve, reject) {
-                var slice = [];
-                var iteration_start = Date.now();
-                var consuming = setInterval(consume, opConfig.interval);
+        function processSlice() {
+            return new Promise(((resolveSlice, reject) => {
+                const slice = [];
+                const iterationStart = Date.now();
+                const consuming = setInterval(consume, opConfig.interval);
 
                 // Listeners are registered on each slice and cleared at the end.
                 function clearListeners() {
@@ -53,7 +53,7 @@ function newReader(context, opConfig, jobConfig) {
                 function completeSlice() {
                     clearListeners();
                     jobLogger.warn(`Resolving with ${slice.length} results`);
-                    resolve(slice);
+                    resolveSlice(slice);
                 }
 
                 function error(err) {
@@ -72,10 +72,10 @@ function newReader(context, opConfig, jobConfig) {
                 }
 
                 function consume() {
-                    if (((Date.now() - iteration_start) > opConfig.wait) || (slice.length >= opConfig.size)) {
+                    if (((Date.now() - iterationStart) > opConfig.wait) ||
+                        (slice.length >= opConfig.size)) {
                         completeSlice();
-                    }
-                    else {
+                    } else {
                         consumer.consume(opConfig.size - slice.length);
                     }
                 }
@@ -101,9 +101,9 @@ function newReader(context, opConfig, jobConfig) {
 
                 // Kick off initial processing.
                 consume();
-            });
+            }));
         }
-    });
+    }));
 }
 
 function slicerQueueLength() {
@@ -111,18 +111,16 @@ function slicerQueueLength() {
     return 'QUEUE_MINIMUM_SIZE';
 }
 
-function newSlicer(context, job, retryData, slicerAnalytics, logger) {
+function newSlicer() {
     // The slicer actually has no work to do here.
-    return Promise.resolve([function() {
-        return new Promise(function(resolve, reject) {
-            // We're using a timeout here to slow down the rate that slices
-            // are created otherwise it swamps the queue on startup. The
-            // value returned is meaningless but we still need something.
-            setTimeout(function() {
-                resolve(1);
-            }, 100)
-        });
-    }]);
+    return Promise.resolve([() => new Promise((resolve) => {
+        // We're using a timeout here to slow down the rate that slices
+        // are created otherwise it swamps the queue on startup. The
+        // value returned is meaningless but we still need something.
+        setTimeout(() => {
+            resolve(1);
+        }, 100);
+    })]);
 }
 
 function schema() {
@@ -161,8 +159,8 @@ function schema() {
 }
 
 module.exports = {
-    newReader: newReader,
-    newSlicer: newSlicer,
-    schema: schema,
-    slicerQueueLength: slicerQueueLength
+    newReader,
+    newSlicer,
+    schema,
+    slicerQueueLength
 };
