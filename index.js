@@ -11,6 +11,9 @@ function newReader(context, opConfig, jobConfig) {
         options: {
             type: "consumer",
             group: opConfig.group
+        },
+        topic_options: {
+            'enable.auto.commit': false
         }
     }).client;
 
