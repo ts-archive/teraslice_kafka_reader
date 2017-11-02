@@ -33,6 +33,8 @@ function newReader(context, opConfig) {
                 const iterationStart = Date.now();
                 const consuming = setInterval(consume, opConfig.interval);
 
+                let blocking = false;
+
                 // Listeners are registered on each slice and cleared at the end.
                 function clearListeners() {
                     clearInterval(consuming);
@@ -67,7 +69,10 @@ function newReader(context, opConfig) {
                     if (((Date.now() - iterationStart) > opConfig.wait) ||
                         (slice.length >= opConfig.size)) {
                         completeSlice();
-                    } else {
+                    } else if (!blocking) {
+                        // We only want one consume call active at any given time
+                        blocking = true;
+
                         // Our goal is to get up to opConfig.size messages but
                         // we may get less on each call.
                         consumer.consume(opConfig.size - slice.length, (err, messages) => {
@@ -83,6 +88,8 @@ function newReader(context, opConfig) {
 
                             if (slice.length >= opConfig.size) {
                                 completeSlice();
+                            } else {
+                                blocking = false;
                             }
                         });
                     }
