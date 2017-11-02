@@ -36,7 +36,7 @@ function newReader(context, opConfig) {
                 // Listeners are registered on each slice and cleared at the end.
                 function clearListeners() {
                     clearInterval(consuming);
-                    consumer.removeListener('data', receiveData);
+                    // consumer.removeListener('data', receiveData);
                     consumer.removeListener('error', error);
                     events.removeListener('worker:shutdown', shutdown);
                 }
@@ -53,6 +53,7 @@ function newReader(context, opConfig) {
                 function completeSlice() {
                     clearListeners();
                     jobLogger.warn(`Resolving with ${slice.length} results`);
+
                     resolveSlice(slice);
                 }
 
@@ -62,21 +63,28 @@ function newReader(context, opConfig) {
                     reject(err);
                 }
 
-                // Process a chunk of data received from Kafka
-                function receiveData(data) {
-                    slice.push(data.value);
-
-                    if (slice.length >= opConfig.size) {
-                        completeSlice();
-                    }
-                }
-
                 function consume() {
                     if (((Date.now() - iterationStart) > opConfig.wait) ||
                         (slice.length >= opConfig.size)) {
                         completeSlice();
                     } else {
-                        consumer.consume(opConfig.size - slice.length);
+                        // Our goal is to get up to opConfig.size messages but
+                        // we may get less on each call.
+                        consumer.consume(opConfig.size - slice.length, (err, messages) => {
+                            if (err) {
+                                // logger.error(err);
+                                reject(err);
+                                return;
+                            }
+
+                            messages.forEach((message) => {
+                                slice.push(message.value);
+                            });
+
+                            if (slice.length >= opConfig.size) {
+                                completeSlice();
+                            }
+                        });
                     }
                 }
 
@@ -93,7 +101,6 @@ function newReader(context, opConfig) {
                     events.removeListener('slice:success', commit);
                 }
 
-                consumer.on('data', receiveData);
                 consumer.on('error', error);
 
                 events.on('worker:shutdown', shutdown);
