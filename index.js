@@ -24,6 +24,11 @@ function newReader(context, opConfig) {
             jobLogger.info('Consumer ready');
             consumer.subscribe([opConfig.topic]);
 
+            // for debug logs.
+            consumer.on('event.log', (event) => {
+                jobLogger.info(event);
+            });
+
             resolve(processSlice);
         });
 
@@ -66,6 +71,10 @@ function newReader(context, opConfig) {
                 }
 
                 function consume() {
+                    // If we're blocking we don't want to complete or read
+                    // data until unblocked.
+                    if (blocking) return;
+
                     if (((Date.now() - iterationStart) > opConfig.wait) ||
                         (slice.length >= opConfig.size)) {
                         completeSlice();
