@@ -1,6 +1,9 @@
 'use strict';
 
 const Promise = require('bluebird');
+const _ = require('lodash');
+
+const KAFKA_NO_OFFSET_STORED = -168;
 
 function newReader(context, opConfig) {
     const events = context.foundation.getEventEmitter();
@@ -13,12 +16,19 @@ function newReader(context, opConfig) {
             group: opConfig.group
         },
         topic_options: {
-            'enable.auto.commit': false
+        },
+        rdkafka_options: {
+            // We want to explicitly manage offset commits.
+            'enable.auto.commit': false,
+            'enable.auto.offset.store': false
         }
     }).client;
 
     return new Promise(((resolve) => {
         let shuttingdown = false;
+        let readyToProcess = false;
+
+        let rollbackOffsets = {};
 
         consumer.on('ready', () => {
             jobLogger.info('Consumer ready');
@@ -29,23 +39,37 @@ function newReader(context, opConfig) {
                 jobLogger.info(event);
             });
 
+            readyToProcess = true;
+
             resolve(processSlice);
         });
 
-        function processSlice() {
+        function processSlice(data, logger) {
             return new Promise(((resolveSlice, reject) => {
                 const slice = [];
                 const iterationStart = Date.now();
                 const consuming = setInterval(consume, opConfig.interval);
 
-                let blocking = false;
+                const startingOffsets = {};
+                const endingOffsets = {};
 
                 // Listeners are registered on each slice and cleared at the end.
-                function clearListeners() {
+                function clearPrimaryListeners() {
                     clearInterval(consuming);
                     // consumer.removeListener('data', receiveData);
                     consumer.removeListener('error', error);
                     events.removeListener('worker:shutdown', shutdown);
+                }
+
+                function clearSliceListeners() {
+                    // These can't be called in clearPrimaryListners as they
+                    // must exist after processing of the slice is complete.
+                    events.removeListener('slice:success', commit);
+
+                    // This can be registared to different functions depending
+                    // on configuration.
+                    events.removeListener('slice:failure', rollback);
+                    events.removeListener('slice:failure', commit);
                 }
 
                 // Called when the job is shutting down but this occurs before
@@ -58,29 +82,34 @@ function newReader(context, opConfig) {
 
                 // Called when slice processing is completed.
                 function completeSlice() {
-                    clearListeners();
-                    jobLogger.warn(`Resolving with ${slice.length} results`);
+                    clearPrimaryListeners();
+                    logger.info(`Resolving with ${slice.length} results`);
+
+                    // We keep track of where we start reading for each slice.
+                    // If there is an error we'll rewind the consumer and read
+                    // the slice again.
+                    rollbackOffsets = startingOffsets;
 
                     resolveSlice(slice);
                 }
 
                 function error(err) {
-                    jobLogger.error(err);
-                    clearListeners();
+                    logger.error(err);
+                    clearPrimaryListeners();
                     reject(err);
                 }
 
                 function consume() {
                     // If we're blocking we don't want to complete or read
                     // data until unblocked.
-                    if (blocking) return;
+                    if (!readyToProcess) return;
 
                     if (((Date.now() - iterationStart) > opConfig.wait) ||
                         (slice.length >= opConfig.size)) {
                         completeSlice();
-                    } else if (!blocking) {
+                    } else {
                         // We only want one consume call active at any given time
-                        blocking = true;
+                        readyToProcess = false;
 
                         // Our goal is to get up to opConfig.size messages but
                         // we may get less on each call.
@@ -92,13 +121,24 @@ function newReader(context, opConfig) {
                             }
 
                             messages.forEach((message) => {
+                                // We want to track the first offset we receive so
+                                // we can rewind if there is an error.
+                                if (!startingOffsets[message.partition]) {
+                                    startingOffsets[message.partition] = message.offset;
+                                }
+
+                                // We record the last offset we see for each
+                                // partition so that if the slice is successfull
+                                // they can be committed.
+                                endingOffsets[message.partition] = message.offset + 1;
+
                                 slice.push(message.value);
                             });
 
                             if (slice.length >= opConfig.size) {
                                 completeSlice();
                             } else {
-                                blocking = false;
+                                readyToProcess = true;
                             }
                         });
                     }
@@ -106,21 +146,82 @@ function newReader(context, opConfig) {
 
                 // We only want to move offsets if the slice is successful.
                 function commit() {
-                    consumer.commit();
+                    readyToProcess = false;
+                    clearSliceListeners();
+
+                    try {
+                        // Ideally we'd use commitSync here but it seems to throw
+                        // an exception everytime it's called.
+                        _.forOwn(endingOffsets, (offset, partition) => {
+                            consumer.commitSync({
+                                partition: parseInt(partition, 10),
+                                offset,
+                                topic: opConfig.topic
+                            });
+                        });
+                    } catch (err) {
+                        // If this is the first slice and the slice is Empty
+                        // there may be no offsets stored which is not really
+                        // an error.
+                        if (err.code !== KAFKA_NO_OFFSET_STORED) {
+                            reject(err);
+                        }
+                    }
 
                     if (shuttingdown) {
                         consumer.disconnect();
+                    } else {
+                        readyToProcess = true;
+                    }
+                }
+
+                // If processing the slice fails we need to roll back to the
+                // previous state.
+                function rollback() {
+                    readyToProcess = false;
+                    clearSliceListeners();
+
+                    let count = _.keys(rollbackOffsets).length;
+                    if (count === 0) {
+                        readyToProcess = true;
                     }
 
-                    // This can't be called in clearListners as it must exist
-                    // after processing of the slice is complete.
-                    events.removeListener('slice:success', commit);
+                    _.forOwn(rollbackOffsets, (offset, partition) => {
+                        consumer.seek({
+                            partition: parseInt(partition, 10),
+                            offset,
+                            topic: opConfig.topic
+                        }, 1000, (err) => {
+                            if (err) {
+                                logger.error(err);
+                            }
+
+                            count -= 1;
+                            if (count === 0) {
+                                readyToProcess = true;
+                            }
+                        });
+                    });
                 }
 
                 consumer.on('error', error);
 
                 events.on('worker:shutdown', shutdown);
                 events.on('slice:success', commit);
+                if (opConfig.rollback_on_failure) {
+                    events.on('slice:failure', rollback);
+                } else {
+                    // If we're not rolling back on failure we'll just commit
+                    // as if nothing happened however this can lead to data
+                    // loss. The problem comes if the failure is caused by a
+                    // minor issue where every read of the data fails and this
+                    // will prevent the job from moving forward. As error
+                    // handling in teraslice becomes more granular this will
+                    // be revisited. Turning this off is necessary in some
+                    // cases but in general is a bad idea.
+                    events.on('slice:failure', commit);
+                }
+
 
                 // Kick off initial processing.
                 consume();
@@ -137,12 +238,7 @@ function slicerQueueLength() {
 function newSlicer() {
     // The slicer actually has no work to do here.
     return Promise.resolve([() => new Promise((resolve) => {
-        // We're using a timeout here to slow down the rate that slices
-        // are created otherwise it swamps the queue on startup. The
-        // value returned is meaningless but we still need something.
-        setTimeout(() => {
-            resolve(1);
-        }, 100);
+        resolve(1);
     })]);
 }
 
@@ -177,6 +273,11 @@ function schema() {
             doc: 'The Kafka consumer connection to use.',
             default: '',
             format: 'required_String'
+        },
+        rollback_on_failure: {
+            doc: 'Controls whether the consumer state is rolled back on failure. This will protect against data loss, however this can have an unintended side effect of blocking the job from moving if failures are minor and persistent. NOTE: This currently defaults to `false` due to the side effects of the behavior, at some point in the future it is expected this will default to `true`.',
+            default: false,
+            format: Boolean
         }
     };
 }
