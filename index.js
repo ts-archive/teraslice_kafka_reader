@@ -65,7 +65,11 @@ function newReader(context, opConfig) {
                     // These can't be called in clearPrimaryListners as they
                     // must exist after processing of the slice is complete.
                     events.removeListener('slice:success', commit);
+
+                    // This can be registared to different functions depending
+                    // on configuration.
                     events.removeListener('slice:failure', rollback);
+                    events.removeListener('slice:failure', commit);
                 }
 
                 // Called when the job is shutting down but this occurs before
@@ -271,8 +275,8 @@ function schema() {
             format: 'required_String'
         },
         rollback_on_failure: {
-            doc: 'Controls whether the consumer state is rolled back on failure. This will protect against data loss, however this can have an unintended side effect of blocking the job from moving if failures are minor and persistent.',
-            default: true,
+            doc: 'Controls whether the consumer state is rolled back on failure. This will protect against data loss, however this can have an unintended side effect of blocking the job from moving if failures are minor and persistent. NOTE: This currently defaults to `false` due to the side effects of the behavior, at some point in the future it is expected this will default to `true`.',
+            default: false,
             format: Boolean
         }
     };
