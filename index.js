@@ -8,22 +8,31 @@ const KAFKA_NO_OFFSET_STORED = -168;
 function newReader(context, opConfig) {
     const events = context.foundation.getEventEmitter();
     const jobLogger = context.logger;
-    const consumer = context.foundation.getConnection({
-        type: 'kafka',
-        endpoint: opConfig.connection,
-        options: {
-            type: 'consumer',
-            group: opConfig.group
-        },
-        topic_options: {
-        },
-        rdkafka_options: {
-            // We want to explicitly manage offset commits.
-            'enable.auto.commit': false,
-            'enable.auto.offset.store': false,
-            'queued.min.messages': 2 * opConfig.size
-        }
-    }).client;
+
+    // We keep track of consecutive 0 record slices in order to defend against
+    // the consumer failing to read data.
+    let watchdogCount = 0;
+
+    function createConsumer() {
+        return context.foundation.getConnection({
+            type: 'kafka',
+            endpoint: opConfig.connection,
+            options: {
+                type: 'consumer',
+                group: opConfig.group
+            },
+            topic_options: {
+            },
+            rdkafka_options: {
+                // We want to explicitly manage offset commits.
+                'enable.auto.commit': false,
+                'enable.auto.offset.store': false,
+                'queued.min.messages': 2 * opConfig.size
+            }
+        }).client;
+    }
+
+    let consumer = createConsumer();
 
     return new Promise(((resolve) => {
         let shuttingdown = false;
@@ -31,21 +40,41 @@ function newReader(context, opConfig) {
 
         let rollbackOffsets = {};
 
-        consumer.on('ready', () => {
-            jobLogger.info('Consumer ready');
-            consumer.subscribe([opConfig.topic]);
+        function initializeConsumer() {
+            consumer.on('ready', () => {
+                jobLogger.info('Consumer ready');
+                consumer.subscribe([opConfig.topic]);
 
-            // for debug logs.
-            consumer.on('event.log', (event) => {
-                jobLogger.info(event);
+                // for debug logs.
+                consumer.on('event.log', (event) => {
+                    jobLogger.info(event);
+                });
+
+                readyToProcess = true;
+
+                resolve(processSlice);
             });
+        }
 
-            readyToProcess = true;
+        function watchdog(logger) {
+            // watchdog function to reinitialize the consumer if it appears to
+            // be stuck. This is an attempt to defend against an issue in librdkafka
+            // where random consumers simply stop reading data.
+            if (opConfig.watchdog_count > 0 && watchdogCount > opConfig.watchdog_count) {
+                readyToProcess = false;
+                logger.error('Watchdog triggered. Worker has stopped receiving data. Reinitializing the consumer.');
+                consumer.disconnect();
+                consumer = createConsumer();
+                initializeConsumer();
+                watchdogCount = 0;
+            }
+        }
 
-            resolve(processSlice);
-        });
+        initializeConsumer();
 
         function processSlice(data, logger) {
+            watchdog(logger);
+
             return new Promise(((resolveSlice, reject) => {
                 const slice = [];
                 const iterationStart = Date.now();
@@ -85,6 +114,13 @@ function newReader(context, opConfig) {
                 function completeSlice() {
                     clearPrimaryListeners();
                     logger.info(`Resolving with ${slice.length} results`);
+
+                    // Keep track of consecutive 0 record slices.
+                    if (slice.length === 0) {
+                        watchdogCount += 1;
+                    } else {
+                        watchdogCount = 0;
+                    }
 
                     // We keep track of where we start reading for each slice.
                     // If there is an error we'll rewind the consumer and read
@@ -279,6 +315,11 @@ function schema() {
             doc: 'Controls whether the consumer state is rolled back on failure. This will protect against data loss, however this can have an unintended side effect of blocking the job from moving if failures are minor and persistent. NOTE: This currently defaults to `false` due to the side effects of the behavior, at some point in the future it is expected this will default to `true`.',
             default: false,
             format: Boolean
+        },
+        watchdog_count: {
+            doc: 'Number of consecutive zero record slices allowed before the consumer will automatically re-initialize. This is to guard against bugs in librdkafka.',
+            default: -1,
+            format: Number
         }
     };
 }
