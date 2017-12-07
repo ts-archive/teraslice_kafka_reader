@@ -20,7 +20,8 @@ function newReader(context, opConfig) {
         rdkafka_options: {
             // We want to explicitly manage offset commits.
             'enable.auto.commit': false,
-            'enable.auto.offset.store': false
+            'enable.auto.offset.store': false,
+            'queued.min.messages': 2 * opConfig.size
         }
     }).client;
 
@@ -266,7 +267,7 @@ function schema() {
         },
         interval: {
             doc: 'How often to attempt to consume `size` number of records. This only comes into play if the initial consume could not get a full slice.',
-            default: 1000,
+            default: 50,
             format: Number
         },
         connection: {
