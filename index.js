@@ -22,6 +22,7 @@ function newReader(context, opConfig) {
                 group: opConfig.group
             },
             topic_options: {
+                'auto.offset.reset': opConfig.offset_reset
             },
             rdkafka_options: {
                 // We want to explicitly manage offset commits.
@@ -290,6 +291,11 @@ function schema() {
             doc: 'Name of the Kafka consumer group',
             default: '',
             format: 'required_String'
+        },
+        offset_reset: {
+            doc: 'How offset resets should be handled when there are no valid offsets for the consumer group.',
+            default: 'smallest',
+            format: ['smallest', 'earliest', 'beginning', 'largest', 'latest', 'error']
         },
         size: {
             doc: 'How many records to read before a slice is considered complete.',

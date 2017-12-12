@@ -20,6 +20,7 @@ An array of records from Kafka. Array may be up to `size` in length. No addition
 | ---- | ----------- | ------- | -------- |
 | topic | Name of the Kafka topic to process |  | Y |
 | group | Name of the Kafka consumer group | | Y |
+| offset_reset | How offset resets should be handled when there are no valid offsets for the consumer group. | smallest | N |
 | connection | The Kafka consumer connection to use | | Y |
 | size | How many records to read before a slice is considered complete | 10000 | N |
 | wait | How long to wait for a full chunk of data to be available. Specified in milliseconds. | 30000 | N |
