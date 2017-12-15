@@ -96,11 +96,12 @@ function newReader(context, opConfig) {
                     // These can't be called in clearPrimaryListners as they
                     // must exist after processing of the slice is complete.
                     events.removeListener('slice:success', commit);
+                    events.removeListener('slice:finally', clearSliceListeners);
 
                     // This can be registared to different functions depending
                     // on configuration.
-                    events.removeListener('slice:failure', rollback);
-                    events.removeListener('slice:failure', commit);
+                    events.removeListener('slice:retry', rollback);
+                    events.removeListener('slice:retry', commit);
                 }
 
                 // Called when the job is shutting down but this occurs before
@@ -202,7 +203,7 @@ function newReader(context, opConfig) {
                         // there may be no offsets stored which is not really
                         // an error.
                         if (err.code !== KAFKA_NO_OFFSET_STORED) {
-                            reject(err);
+                            logger.error(`Kafka reader error after slice resolution ${err}`);
                         }
                     }
 
@@ -246,8 +247,10 @@ function newReader(context, opConfig) {
 
                 events.on('worker:shutdown', shutdown);
                 events.on('slice:success', commit);
+                events.on('slice:finally', clearSliceListeners);
+
                 if (opConfig.rollback_on_failure) {
-                    events.on('slice:failure', rollback);
+                    events.on('slice:retry', rollback);
                 } else {
                     // If we're not rolling back on failure we'll just commit
                     // as if nothing happened however this can lead to data
@@ -257,7 +260,7 @@ function newReader(context, opConfig) {
                     // handling in teraslice becomes more granular this will
                     // be revisited. Turning this off is necessary in some
                     // cases but in general is a bad idea.
-                    events.on('slice:failure', commit);
+                    events.on('slice:retry', commit);
                 }
 
 
