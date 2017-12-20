@@ -96,7 +96,7 @@ function newReader(context, opConfig) {
                     // These can't be called in clearPrimaryListners as they
                     // must exist after processing of the slice is complete.
                     events.removeListener('slice:success', commit);
-                    events.removeListener('slice:finally', clearSliceListeners);
+                    events.removeListener('slice:finalize', finalize);
 
                     // This can be registared to different functions depending
                     // on configuration.
@@ -243,11 +243,16 @@ function newReader(context, opConfig) {
                     });
                 }
 
+                function finalize() {
+                    clearSliceListeners();
+                    readyToProcess = true;
+                }
+
                 consumer.on('error', error);
 
                 events.on('worker:shutdown', shutdown);
                 events.on('slice:success', commit);
-                events.on('slice:finally', clearSliceListeners);
+                events.on('slice:finalize', finalize);
 
                 if (opConfig.rollback_on_failure) {
                     events.on('slice:retry', rollback);
